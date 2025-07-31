@@ -1,0 +1,16 @@
+name: MyPlugin
+version: 1.1
+main: com.example.myplugin.MyPlugin
+api-version: 1.21
+commands:
+  spawn:
+    description: Телепортирует на спавн
+  hi:
+    description: Приветствует игрока в чате
+  addscore:
+    description: Начислить очки игроку (только для админов)
+    usage: /addscore <ник> <очки>
+permissions:
+  myplugin.admin:
+    description: Разрешает использовать админские команды MyPlugin
+    default: op 
