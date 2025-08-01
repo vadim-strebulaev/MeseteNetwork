@@ -9,24 +9,26 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.enchantment.EnchantItemEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.inventory.PrepareAnvilEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemBreakEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
+import org.bukkit.inventory.AnvilInventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
+import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.enchantments.Enchantment;
+import org.bukkit.inventory.meta.EnchantmentStorageMeta;
+import java.util.Map;
+import java.util.stream.Collectors;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-
-import java.util.List;
 import java.util.Map;
 
 public class EnchelperPlugin extends JavaPlugin implements Listener {
@@ -66,64 +68,167 @@ public class EnchelperPlugin extends JavaPlugin implements Listener {
         applyAbsolutEffect(player);
         applyFastFeetEffect(player);
     }
-    // --- Pfпрет чар --- 
-    private static final Map<String, List<Material>> ENCHANT_RESTRICTIONS = new HashMap<>() {{
-        put("enchelper:konchenniy", Arrays.asList(Material.TOTEM_OF_UNDYING));
-        put("enchelper:konchenniy2", Arrays.asList(Material.TOTEM_OF_UNDYING));
+    // --- Pfпрет чар ---
+    private boolean isEnchantAllowed(ItemStack item, ItemStack addition) {
+        if (!(addition.getItemMeta() instanceof EnchantmentStorageMeta meta)) return true;
 
-        put("enchelper:nuvorish", Arrays.asList(Material.DIAMOND_SWORD, Material.NETHERITE_SWORD,
-                                                Material.IRON_SWORD, Material.STONE_SWORD, Material.WOODEN_SWORD,
-                                                Material.GOLDEN_SWORD,
-                                                Material.DIAMOND_AXE, Material.NETHERITE_AXE,
-                                                Material.IRON_AXE, Material.STONE_AXE, Material.WOODEN_AXE,
-                                                Material.GOLDEN_AXE));
-        put("enchelper:nuvorish2", ENCHANT_RESTRICTIONS.get("enchelper:nuvorish"));
+        for (Enchantment ench : meta.getStoredEnchants().keySet()) {
+            String id = ench.getKey().toString().toLowerCase();
 
-        put("enchelper:bur", Arrays.asList(Material.WOODEN_PICKAXE, Material.STONE_PICKAXE, Material.IRON_PICKAXE,
-                                            Material.GOLDEN_PICKAXE, Material.DIAMOND_PICKAXE, Material.NETHERITE_PICKAXE,
-                                            Material.WOODEN_SHOVEL, Material.STONE_SHOVEL, Material.IRON_SHOVEL,
-                                            Material.GOLDEN_SHOVEL, Material.DIAMOND_SHOVEL, Material.NETHERITE_SHOVEL));
-        put("enchelper:bur2", ENCHANT_RESTRICTIONS.get("enchelper:bur"));
-        put("enchelper:bur3", ENCHANT_RESTRICTIONS.get("enchelper:bur"));
+            // Конченный 1 и 2 → только TOTEM_OF_UNDYING
+            if (id.startsWith("enchelper:konchen") || id.startsWith("enchelper:konchen")) {
+                if (item.getType() != Material.TOTEM_OF_UNDYING) return false;
+            }
 
-        put("enchelper:ksilofilia", Arrays.asList(Material.WOODEN_AXE, Material.STONE_AXE, Material.IRON_AXE,
-                                                Material.GOLDEN_AXE, Material.DIAMOND_AXE, Material.NETHERITE_AXE));
+            // Нувориш 1 и 2 → мечи и топоры
+            if (id.startsWith("enchelper:nuvorish") || id.startsWith("enchelper:nuvorish")) {
+                if (!(item.getType().toString().contains("SWORD") || item.getType().toString().contains("AXE"))) return false;
+            }
 
-        put("enchelper:backup_plan", Arrays.asList(Material.WOODEN_PICKAXE));
-    }};
+            // Бур 1,2,3 → кирка и лопата
+            if (id.startsWith("enchelper:bur") || id.startsWith("enchelper:bur") || id.startsWith("enchelper:bur")) {
+                if (!(item.getType().toString().contains("PICKAXE") || item.getType().toString().contains("SHOVEL"))) return false;
+            }
 
-    private boolean isAllowedFor(String enchantId, Material type) {
-            List<Material> allowed = ENCHANT_RESTRICTIONS.get(enchantId);
-            return allowed != null && allowed.contains(type);
-        }
+            // Ксилофилия → только топор
+            if (id.startsWith("enchelper:ksilofilia")) {
+                if (!item.getType().toString().contains("AXE")) return false;
+            }
 
-        private List<String> getCustomEnchantIds(ItemStack stack) {
-        List<String> list = new ArrayList<>();
-        // твоя реализация: например, чекаешь через getEnchantmentLevel для каждого id
-        for (String id : ENCHANT_RESTRICTIONS.keySet()) {
-            if (getEnchantmentLevel(null, id, new ItemStack[]{stack}) > 0) {
-                list.add(id);
+            // Запасной план → только WOODEN_PICKAXE
+            if (id.startsWith("enchelper:backup_plan")) {
+                if (item.getType() != Material.WOODEN_PICKAXE) return false;
             }
         }
-        return list;
+
+        return true;
     }
 
 
     @EventHandler
-    public void onPrepareAnvil(PrepareAnvilEvent event) {
-        ItemStack item = event.getInventory().getItem(0);   // предмет
+    public void onAnvilPrepare(PrepareAnvilEvent event) {
+        ItemStack item = event.getInventory().getItem(0); // базовый предмет
         ItemStack addition = event.getInventory().getItem(1); // книга
-        if (item == null || addition == null) return;
+        ItemStack result = event.getResult();
 
-        // Получаем все кастомные чары на книге
-        List<String> enchants = getCustomEnchantIds(addition);
-        for (String id : enchants) {
-            if (!isAllowedFor(id, item.getType())) {
-                event.setResult(null); // ❌ отменяем результат
-                return;
+        if (item == null || addition == null || result == null) return;
+
+        // Лог: какие чары есть в книге
+        if (addition.getItemMeta() instanceof EnchantmentStorageMeta meta) {
+            String enchants = meta.getStoredEnchants().entrySet().stream()
+                    .map(e -> e.getKey().getKey() + " " + e.getValue())
+                    .collect(Collectors.joining(", "));
+
+            getLogger().info("🔍 [Anvil] " + item.getType() + " + " + addition.getType() +
+                    " [" + enchants + "] проверяются на кастомные чары...");
+        }
+
+        // --- Проверка: кастомные чары применяются только на правильные предметы ---
+        if (!isEnchantAllowed(item, addition)) {
+            event.setResult(null); // ❌ отменяем результат (запрещаем крафт)
+            getLogger().warning("⛔ [Anvil] Запрещено накладывать эти чары на " + item.getType());
+        }
+    }
+
+
+    /**
+     * ✅ Доп. защита — запрещаем забирать предмет из слота результата
+     */
+    @EventHandler
+    public void onAnvilClick(InventoryClickEvent event) {
+        if (!(event.getInventory() instanceof AnvilInventory)) return;
+
+        if (event.getSlotType() == InventoryType.SlotType.RESULT) {
+            AnvilInventory anvil = (AnvilInventory) event.getInventory();
+            ItemStack item = anvil.getItem(0);
+            ItemStack addition = anvil.getItem(1);
+
+            if (item == null || addition == null) return;
+
+            if (!isValidEnchantCombination(item, addition)) {
+                event.setCancelled(true); // ✅ блокируем клик
+                event.getWhoClicked().sendMessage("§c❌ Невозможно зачаровать этот предмет данной книгой!");
+                getLogger().warning("⛔ [Anvil] Игрок попытался обойти запрет (клик по результату)!");
             }
         }
     }
+
+
+    @EventHandler
+    public void onEnchantItem(EnchantItemEvent event) {
+        ItemStack item = event.getItem(); // предмет, который чарится
+
+        // Логируем
+        getLogger().info("🔍 [EnchantTable] Попытка зачаровать " + item.getType());
+
+        // Если предмет не разрешён — отменяем
+        if (!isAllowedForAnyCustomEnchant(item)) {
+            event.setCancelled(true);
+            getLogger().warning("⛔ [EnchantTable] Запрещено зачаровывать " + item.getType() + " кастомными чарами!");
+        }
+    }
+
+    /**
+     * Проверка, можно ли наложить кастомный чар с книги на предмет
+     */
+    private boolean isValidEnchantCombination(ItemStack target, ItemStack book) {
+        // Проверяем все кастомные чары
+        if (hasCustomEnchant(book, "enchelper:konchenniy") || hasCustomEnchant(book, "enchelper:konchenniy")) {
+            return target.getType() == Material.TOTEM_OF_UNDYING;
+        }
+
+        if (hasCustomEnchant(book, "enchelper:nuvorish") || hasCustomEnchant(book, "enchelper:nuvorish")) {
+            return isSwordOrAxe(target);
+        }
+
+        if (hasCustomEnchant(book, "enchelper:bur") || hasCustomEnchant(book, "enchelper:bur") || hasCustomEnchant(book, "enchelper:bur")) {
+            return isPickaxeOrShovel(target);
+        }
+
+        if (hasCustomEnchant(book, "enchelper:ksilofilia")) {
+            return isAxe(target);
+        }
+
+        if (hasCustomEnchant(book, "enchelper:backup_plan")) {
+            return target.getType() == Material.WOODEN_PICKAXE;
+        }
+
+        // Если нет кастомных чаров — разрешаем
+        return true;
+    }
+
+    /**
+     * Проверка, разрешён ли предмет для любого из кастомных чаров (для стола)
+     */
+    private boolean isAllowedForAnyCustomEnchant(ItemStack item) {
+        Material m = item.getType();
+        return m == Material.TOTEM_OF_UNDYING || isSwordOrAxe(item) || isPickaxeOrShovel(item) || isAxe(item) || m == Material.WOODEN_PICKAXE;
+    }
+
+    /**
+     * Проверяет, есть ли кастомный чар на предмете
+     */
+    private boolean hasCustomEnchant(ItemStack stack, String id) {
+        return getEnchantmentLevel(null, id, new ItemStack[]{stack}) > 0;
+    }
+
+    /**
+     * Утилиты для проверки типа предмета
+     */
+    private boolean isSwordOrAxe(ItemStack item) {
+        String name = item.getType().toString();
+        return name.contains("SWORD") || name.contains("AXE");
+    }
+
+    private boolean isPickaxeOrShovel(ItemStack item) {
+        String name = item.getType().toString();
+        return name.contains("PICKAXE") || name.contains("SHOVEL");
+    }
+
+    private boolean isAxe(ItemStack item) {
+        return item.getType().toString().contains("AXE");
+    }
+
 
 
     // --- Левитация (runaway) ---
